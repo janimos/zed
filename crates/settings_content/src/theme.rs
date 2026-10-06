@@ -1063,6 +1063,23 @@ pub struct ThemeColorsContent {
     #[serde(rename = "link_text.hover")]
     pub link_text_hover: Option<ThemeColor>,
 
+    /// Text color of rendered Markdown inline code when
+    /// `markdown.inline_code.style` is `"theme"`. Falls back to `text`.
+    #[serde(rename = "markdown.inline_code.foreground")]
+    pub markdown_inline_code_foreground: Option<ThemeColor>,
+
+    /// Background color of rendered Markdown inline code when
+    /// `markdown.inline_code.style` is `"theme"`. Falls back to
+    /// `element.background`. A fully transparent color paints no background.
+    #[serde(rename = "markdown.inline_code.background")]
+    pub markdown_inline_code_background: Option<ThemeColor>,
+
+    /// Border color of rendered Markdown inline code when
+    /// `markdown.inline_code.style` is `"theme"`. Falls back to
+    /// `border.variant`. A fully transparent color paints no border.
+    #[serde(rename = "markdown.inline_code.border")]
+    pub markdown_inline_code_border: Option<ThemeColor>,
+
     /// Added version control color.
     #[serde(rename = "version_control.added")]
     pub version_control_added: Option<ThemeColor>,

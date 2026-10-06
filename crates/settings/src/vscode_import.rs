@@ -210,6 +210,7 @@ impl VsCodeSettings {
             helix_mode: None,
             hide_mouse: None,
             image_viewer: None,
+            markdown: None,
             markdown_preview: None,
             journal: None,
             language_models: None,

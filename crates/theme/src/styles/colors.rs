@@ -323,6 +323,22 @@ pub struct ThemeColors {
     /// Represents a link text hover color.
     pub link_text_hover: Hsla,
 
+    /// Text color of rendered Markdown inline code when
+    /// `markdown.inline_code.style` is `"theme"`.
+    ///
+    /// Falls back to `text` when not explicitly set.
+    pub markdown_inline_code_foreground: Option<Hsla>,
+    /// Background color of rendered Markdown inline code when
+    /// `markdown.inline_code.style` is `"theme"`.
+    ///
+    /// Falls back to `element_background` when not explicitly set.
+    pub markdown_inline_code_background: Option<Hsla>,
+    /// Border color of rendered Markdown inline code when
+    /// `markdown.inline_code.style` is `"theme"`.
+    ///
+    /// Falls back to `border_variant` when not explicitly set.
+    pub markdown_inline_code_border: Option<Hsla>,
+
     /// Represents an added entry or hunk in vcs, like git.
     pub version_control_added: Hsla,
     /// Represents a deleted entry in version control systems.
@@ -454,6 +470,9 @@ pub enum ThemeColorField {
     TerminalAnsiBrightWhite,
     TerminalAnsiDimWhite,
     LinkTextHover,
+    MarkdownInlineCodeForeground,
+    MarkdownInlineCodeBackground,
+    MarkdownInlineCodeBorder,
     VersionControlAdded,
     VersionControlDeleted,
     VersionControlModified,
@@ -591,6 +610,15 @@ impl ThemeColors {
             ThemeColorField::TerminalAnsiBrightWhite => self.terminal_ansi_bright_white,
             ThemeColorField::TerminalAnsiDimWhite => self.terminal_ansi_dim_white,
             ThemeColorField::LinkTextHover => self.link_text_hover,
+            ThemeColorField::MarkdownInlineCodeForeground => {
+                self.markdown_inline_code_foreground.unwrap_or(self.text)
+            }
+            ThemeColorField::MarkdownInlineCodeBackground => self
+                .markdown_inline_code_background
+                .unwrap_or(self.element_background),
+            ThemeColorField::MarkdownInlineCodeBorder => self
+                .markdown_inline_code_border
+                .unwrap_or(self.border_variant),
             ThemeColorField::VersionControlAdded => self.version_control_added,
             ThemeColorField::VersionControlDeleted => self.version_control_deleted,
             ThemeColorField::VersionControlModified => self.version_control_modified,

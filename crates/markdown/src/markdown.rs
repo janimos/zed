@@ -15,7 +15,7 @@ use mermaid::{
     MermaidState, ParsedMarkdownMermaidDiagram, extract_mermaid_diagrams, render_mermaid_diagram,
 };
 pub use path_range::{LineCol, PathWithRange};
-use settings::Settings as _;
+use settings::{IntoGpui, MarkdownInlineCodeStyle, RegisterSetting, Settings};
 use smallvec::SmallVec;
 use theme_settings::ThemeSettings;
 use util::maybe;
@@ -50,7 +50,7 @@ use parser::{
 };
 use pulldown_cmark::{Alignment, BlockQuoteKind};
 use sum_tree::TreeMap;
-use theme::SyntaxTheme;
+use theme::{SyntaxTheme, ThemeColorField};
 use ui::{Checkbox, CopyButton, ScrollAxes, Scrollbars, Tooltip, WithScrollbar, prelude::*};
 use util::ResultExt;
 
@@ -105,6 +105,35 @@ pub struct HeadingLevelStyles {
     pub h6: Option<TextStyleRefinement>,
 }
 
+/// Settings shared by rendered Markdown.
+#[derive(Clone, Copy, Debug, Default, RegisterSetting)]
+pub struct MarkdownSettings {
+    pub inline_code_style: MarkdownInlineCodeStyle,
+    /// The following only apply to the `"theme"` inline code style.
+    pub inline_code_padding: Pixels,
+    pub inline_code_corner_radius: Pixels,
+}
+
+impl Settings for MarkdownSettings {
+    fn from_settings(content: &settings::SettingsContent) -> Self {
+        let inline_code = content
+            .markdown
+            .as_ref()
+            .and_then(|markdown| markdown.inline_code.as_ref());
+        Self {
+            inline_code_style: inline_code
+                .and_then(|inline_code| inline_code.style)
+                .unwrap_or_default(),
+            inline_code_padding: inline_code
+                .and_then(|inline_code| inline_code.padding)
+                .map_or(px(4.), IntoGpui::into_gpui),
+            inline_code_corner_radius: inline_code
+                .and_then(|inline_code| inline_code.corner_radius)
+                .map_or(CLASSIC_CODE_CHIP_CORNER_RADIUS, IntoGpui::into_gpui),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct MarkdownStyle {
     pub base_text_style: TextStyle,
@@ -112,6 +141,12 @@ pub struct MarkdownStyle {
     pub code_block: StyleRefinement,
     pub code_block_overflow_x_scroll: bool,
     pub inline_code: TextStyleRefinement,
+    /// Painted around the inline code background, which comes from
+    /// `inline_code.background_color`
+    pub inline_code_border: Option<Hsla>,
+    /// Adds horizontal padding inside the inline code background
+    pub inline_code_padding: Option<InlineCodePadding>,
+    pub inline_code_corner_radius: Pixels,
     pub block_quote: TextStyleRefinement,
     pub link: TextStyleRefinement,
     pub link_callback: Option<LinkStyleCallback>,
@@ -143,6 +178,9 @@ impl Default for MarkdownStyle {
             code_block: Default::default(),
             code_block_overflow_x_scroll: false,
             inline_code: Default::default(),
+            inline_code_border: None,
+            inline_code_padding: None,
+            inline_code_corner_radius: CLASSIC_CODE_CHIP_CORNER_RADIUS,
             block_quote: Default::default(),
             link: Default::default(),
             link_callback: None,
@@ -163,6 +201,51 @@ impl Default for MarkdownStyle {
             table_columns_min_size: false,
             soft_break_as_hard_break: false,
         }
+    }
+}
+
+const CLASSIC_CODE_CHIP_CORNER_RADIUS: Pixels = px(4.);
+
+/// Padding is made of non-breaking spaces rather than layout space, which the
+/// text layout cannot reserve inside a line.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InlineCodePadding {
+    pub spacer_count: usize,
+    /// Never larger than the surrounding text, since a larger font would grow
+    /// the line's ascent and shift its baseline.
+    pub font_size: Option<Pixels>,
+}
+
+impl InlineCodePadding {
+    const MAX_SPACERS: usize = 4;
+
+    fn for_width(
+        width: Pixels,
+        text_style: &TextStyle,
+        window: &Window,
+    ) -> Option<InlineCodePadding> {
+        if width <= px(0.) {
+            return None;
+        }
+        let text_system = window.text_system();
+        let font_size = text_style.font_size.to_pixels(window.rem_size());
+        let spacer_width = text_system
+            .advance(
+                text_system.resolve_font(&text_style.font()),
+                font_size,
+                '\u{00A0}',
+            )
+            .log_err()?
+            .width;
+        if spacer_width <= px(0.) {
+            return None;
+        }
+        let spacer_count = ((width / spacer_width).ceil() as usize).clamp(1, Self::MAX_SPACERS);
+        let scale = (width / (spacer_width * spacer_count as f32)).min(1.);
+        Some(InlineCodePadding {
+            spacer_count,
+            font_size: Some(font_size * scale),
+        })
     }
 }
 
@@ -338,14 +421,42 @@ impl MarkdownStyle {
             ..Default::default()
         };
 
-        if is_preview {
+        let style = if is_preview {
             style.with_preview_overrides(
                 colors,
                 theme_settings.markdown_preview_heading_font_weight(),
             )
         } else {
             style
+        };
+        style.with_inline_code_settings(colors, window, cx)
+    }
+
+    fn with_inline_code_settings(
+        mut self,
+        colors: &theme::ThemeColors,
+        window: &Window,
+        cx: &App,
+    ) -> Self {
+        let settings = MarkdownSettings::get_global(cx);
+        match settings.inline_code_style {
+            MarkdownInlineCodeStyle::Classic => {}
+            MarkdownInlineCodeStyle::Theme => {
+                self.inline_code.color =
+                    Some(colors.color(ThemeColorField::MarkdownInlineCodeForeground));
+                self.inline_code.background_color =
+                    Some(colors.color(ThemeColorField::MarkdownInlineCodeBackground));
+                self.inline_code_border =
+                    Some(colors.color(ThemeColorField::MarkdownInlineCodeBorder));
+                self.inline_code_padding = InlineCodePadding::for_width(
+                    settings.inline_code_padding,
+                    &self.base_text_style,
+                    window,
+                );
+                self.inline_code_corner_radius = settings.inline_code_corner_radius;
+            }
         }
+        self
     }
 
     fn with_preview_overrides(
@@ -1894,7 +2005,16 @@ impl MarkdownElement {
         };
 
         let mut code_style = self.style.inline_code.clone();
-        let chip_background = code_style.background_color.take();
+        let chip = code_style
+            .background_color
+            .take()
+            .map(|background| CodeChipStyle {
+                background,
+                border: self.style.inline_code_border,
+                corner_radius: self.style.inline_code_corner_radius,
+            });
+        let padding = self.style.inline_code_padding.filter(|_| chip.is_some());
+        let code_end = range.end;
 
         if let Some(url) = link_url {
             builder.push_link(url.clone(), range.clone());
@@ -1904,18 +2024,24 @@ impl MarkdownElement {
                 .as_ref()
                 .and_then(|callback| callback(url.as_ref(), cx))
                 .unwrap_or_else(|| self.style.link.clone());
+            // Padding is pushed outside the code style so it takes the width of
+            // a prose space rather than a full monospace cell.
+            let chip_start = builder.begin_code_chip(range.start, padding);
             builder.push_text_style(code_style);
             builder.push_text_style(link_style);
-            builder.push_code_chip_text(text, range, chip_background);
+            builder.push_text(text, range);
             builder.pop_text_style();
             builder.pop_text_style();
+            builder.end_code_chip(chip_start, code_end, chip, padding);
         } else {
             if builder.link_depth > 0 {
                 code_style.color = self.style.link.color.or(code_style.color);
             }
+            let chip_start = builder.begin_code_chip(range.start, padding);
             builder.push_text_style(code_style);
-            builder.push_code_chip_text(text, range, chip_background);
+            builder.push_text(text, range);
             builder.pop_text_style();
+            builder.end_code_chip(chip_start, code_end, chip, padding);
         }
     }
 
@@ -3843,8 +3969,21 @@ struct PendingLine {
     source_mappings: Vec<SourceMapping>,
     /// Rendered (not source) indices, so chips hug the glyphs and ignore
     /// unrendered characters like the surrounding backticks
-    code_chips: Vec<(Range<usize>, Hsla)>,
+    code_chips: Vec<(Range<usize>, CodeChipStyle)>,
+    /// Rendered ranges of the spacers inserted for inline code padding, which
+    /// are excluded when copying
+    code_padding: Vec<Range<usize>>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CodeChipStyle {
+    background: Hsla,
+    border: Option<Hsla>,
+    corner_radius: Pixels,
+}
+
+/// A non-breaking space keeps the padding attached to the code when wrapping.
+const CODE_PADDING_SPACER: &str = "\u{00A0}";
 
 struct ListStackEntry {
     bullet_index: Option<u64>,
@@ -3884,22 +4023,57 @@ impl MarkdownElementBuilder {
         }
     }
 
-    fn push_code_chip_text(
-        &mut self,
-        text: &str,
-        source_range: Range<usize>,
-        chip_background: Option<Hsla>,
-    ) {
+    /// Returns the rendered start of the chip, to pass to [`Self::end_code_chip`].
+    fn begin_code_chip(&mut self, code_start: usize, padding: Option<InlineCodePadding>) -> usize {
         let chip_start = self.pending_line.text.len();
-        self.push_text(text, source_range);
-        if let Some(background) = chip_background {
+        if let Some(padding) = padding {
+            // Map the spacers onto the unrendered backticks, so source
+            // positions inside the code span still map to its glyphs.
+            self.push_code_padding(code_start.saturating_sub(1), padding);
+        }
+        chip_start
+    }
+
+    fn end_code_chip(
+        &mut self,
+        chip_start: usize,
+        code_end: usize,
+        chip: Option<CodeChipStyle>,
+        padding: Option<InlineCodePadding>,
+    ) {
+        if let Some(padding) = padding {
+            self.push_code_padding(code_end, padding);
+            // Source positions after the closing backtick must not map into
+            // the middle of the multi-byte spacer.
+            self.pending_line.source_mappings.push(SourceMapping {
+                rendered_index: self.pending_line.text.len(),
+                source_index: code_end + 1,
+            });
+        }
+        if let Some(chip) = chip {
             let chip_end = self.pending_line.text.len();
             if chip_start < chip_end {
                 self.pending_line
                     .code_chips
-                    .push((chip_start..chip_end, background));
+                    .push((chip_start..chip_end, chip));
             }
         }
+    }
+
+    fn push_code_padding(&mut self, source_index: usize, padding: InlineCodePadding) {
+        let start = self.pending_line.text.len();
+        self.push_text_style(TextStyleRefinement {
+            font_size: padding.font_size.map(Into::into),
+            ..Default::default()
+        });
+        self.push_text(
+            &CODE_PADDING_SPACER.repeat(padding.spacer_count),
+            source_index..source_index,
+        );
+        self.pop_text_style();
+        self.pending_line
+            .code_padding
+            .push(start..self.pending_line.text.len());
     }
 
     fn push_text_style(&mut self, style: TextStyleRefinement) {
@@ -4251,6 +4425,7 @@ impl MarkdownElementBuilder {
             text_align: TextAlign::Left,
             highlights: SmallVec::new(),
             code_chips: SmallVec::new(),
+            code_padding: SmallVec::new(),
         }));
         div()
             .absolute()
@@ -4290,6 +4465,7 @@ impl MarkdownElementBuilder {
             text_align,
             highlights,
             code_chips: line.code_chips.into_iter().collect(),
+            code_padding: line.code_padding.into_iter().collect(),
         });
         self.rendered_lines.push(rendered_line.clone());
         self.append_child(
@@ -4397,14 +4573,14 @@ struct RenderedLine {
     /// Highlighted source ranges intersecting this line, in paint order
     highlights: SmallVec<[(Range<usize>, Hsla); 1]>,
     /// Inline code chip ranges intersecting this line, in rendered indices
-    code_chips: SmallVec<[(Range<usize>, Hsla); 1]>,
+    code_chips: SmallVec<[(Range<usize>, CodeChipStyle); 1]>,
+    /// Inline code padding spacers on this line, in rendered indices
+    code_padding: SmallVec<[Range<usize>; 2]>,
 }
 
 impl RenderedLine {
     /// Painted before the glyphs so the text renders on top of the chips
     fn paint_code_chips(&self, window: &mut Window) {
-        const CHIP_CORNER_RADIUS: Pixels = px(4.);
-
         if self.code_chips.is_empty() {
             return;
         }
@@ -4413,7 +4589,11 @@ impl RenderedLine {
             return;
         }
 
-        for (rendered_range, color) in &self.code_chips {
+        for (rendered_range, chip) in &self.code_chips {
+            let border = chip.border.filter(|border| !border.is_transparent());
+            if chip.background.is_transparent() && border.is_none() {
+                continue;
+            }
             self.for_each_bounds_in_rendered_range(
                 &wrapped_line_segments,
                 rendered_range.clone(),
@@ -4436,10 +4616,14 @@ impl RenderedLine {
                     };
                     window.paint_quad(quad(
                         chip_bounds,
-                        CHIP_CORNER_RADIUS,
-                        *color,
-                        Edges::default(),
-                        Hsla::transparent_black(),
+                        chip.corner_radius,
+                        chip.background,
+                        if border.is_some() {
+                            Edges::all(px(1.))
+                        } else {
+                            Edges::default()
+                        },
+                        border.unwrap_or(Hsla::transparent_black()),
                         BorderStyle::default(),
                     ));
                 },
@@ -5042,7 +5226,15 @@ impl RenderedText {
             }
             .min(text.len());
 
-            accumulator.push_str(&text[start..end]);
+            let mut copied_until = start;
+            for padding in &line.code_padding {
+                if padding.end <= copied_until || padding.start >= end {
+                    continue;
+                }
+                accumulator.push_str(&text[copied_until..padding.start.max(copied_until)]);
+                copied_until = padding.end.min(end);
+            }
+            accumulator.push_str(&text[copied_until..end]);
             accumulator.push('\n');
         }
         // Remove trailing newline
@@ -5861,6 +6053,115 @@ mod tests {
                 ("four".to_string(), chip_background)
             ]
         );
+    }
+
+    #[gpui::test]
+    fn test_inline_code_style_defaults_to_classic(cx: &mut TestAppContext) {
+        ensure_theme_initialized(cx);
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        cx.update(|window, cx| {
+            let classic_background = cx.theme().colors().editor_foreground.opacity(0.08);
+            for font in [MarkdownFont::Agent, MarkdownFont::Preview] {
+                let style = MarkdownStyle::themed(font, window, cx);
+                assert_eq!(style.inline_code.background_color, Some(classic_background));
+                assert_eq!(style.inline_code_border, None);
+                assert_eq!(style.inline_code_padding, None);
+                assert_eq!(style.inline_code_corner_radius, px(4.));
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn test_inline_code_theme_style_falls_back_per_token(cx: &mut TestAppContext) {
+        ensure_theme_initialized(cx);
+        cx.update(|cx| {
+            settings::SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings
+                        .markdown
+                        .get_or_insert_default()
+                        .inline_code
+                        .get_or_insert_default()
+                        .style = Some(MarkdownInlineCodeStyle::Theme);
+                });
+            });
+        });
+        cx.run_until_parked();
+
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        cx.update(|window, cx| {
+            let syntax = cx.theme().syntax().clone();
+            let mut colors = cx.theme().colors().clone();
+            colors.markdown_inline_code_foreground = None;
+            colors.markdown_inline_code_background = None;
+            colors.markdown_inline_code_border = None;
+
+            for font in [MarkdownFont::Agent, MarkdownFont::Preview] {
+                let style =
+                    MarkdownStyle::themed_with_overrides(font, &colors, &syntax, window, cx);
+                assert_eq!(style.inline_code.color, Some(colors.text));
+                assert_eq!(
+                    style.inline_code.background_color,
+                    Some(colors.element_background)
+                );
+                assert_eq!(style.inline_code_border, Some(colors.border_variant));
+                assert!(style.inline_code_padding.is_some());
+            }
+
+            colors.markdown_inline_code_foreground = Some(gpui::red());
+            colors.markdown_inline_code_background = Some(Hsla::transparent_black());
+            let style = MarkdownStyle::themed_with_overrides(
+                MarkdownFont::Agent,
+                &colors,
+                &syntax,
+                window,
+                cx,
+            );
+            assert_eq!(style.inline_code.color, Some(gpui::red()));
+            assert_eq!(
+                style.inline_code.background_color,
+                Some(Hsla::transparent_black()),
+                "an explicitly transparent background must not fall back"
+            );
+            assert_eq!(style.inline_code_border, Some(colors.border_variant));
+        });
+    }
+
+    #[gpui::test]
+    fn test_inline_code_padding_is_painted_but_not_copied(cx: &mut TestAppContext) {
+        let chip_background = gpui::red();
+        let style_with_padding = || MarkdownStyle {
+            inline_code: TextStyleRefinement {
+                background_color: Some(chip_background),
+                ..Default::default()
+            },
+            inline_code_padding: Some(InlineCodePadding {
+                spacer_count: 1,
+                font_size: None,
+            }),
+            ..Default::default()
+        };
+        let source = "one `two` three ``four``.";
+
+        assert_eq!(
+            rendered_code_chips(source, style_with_padding(), cx),
+            vec![
+                ("\u{a0}two\u{a0}".to_string(), chip_background),
+                ("\u{a0}four\u{a0}".to_string(), chip_background)
+            ]
+        );
+
+        let markdown = cx.new(|cx| Markdown::new(source.to_string().into(), None, None, cx));
+        cx.run_until_parked();
+        let rendered =
+            render_markdown_entity_in_view(markdown, style_with_padding(), None, None, cx);
+        assert_eq!(
+            rendered.text_for_range(0..source.len()),
+            "one two three four."
+        );
+        // Ends between the two closing backticks, just past the padding spacer
+        assert_eq!(rendered.text_for_range(0..23), "one two three four");
+        assert_eq!(rendered.text_for_range(5..8), "two");
     }
 
     #[gpui::test]
@@ -8122,7 +8423,7 @@ mod tests {
                 let text = line.layout.text();
                 line.code_chips
                     .iter()
-                    .map(|(range, color)| (text[range.clone()].to_string(), *color))
+                    .map(|(range, chip)| (text[range.clone()].to_string(), chip.background))
                     .collect::<Vec<_>>()
             })
             .collect()

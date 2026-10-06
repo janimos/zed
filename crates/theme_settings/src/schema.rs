@@ -761,6 +761,18 @@ pub fn theme_colors_refinement(
             .link_text_hover
             .as_ref()
             .and_then(|color| try_parse_color(color).ok()),
+        markdown_inline_code_foreground: this
+            .markdown_inline_code_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        markdown_inline_code_background: this
+            .markdown_inline_code_background
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        markdown_inline_code_border: this
+            .markdown_inline_code_border
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
         version_control_added,
         version_control_deleted,
         version_control_modified: this

@@ -241,6 +241,10 @@ pub struct SettingsContent {
     /// The settings for the image viewer.
     pub image_viewer: Option<ImageViewerSettingsContent>,
 
+    /// Settings shared by rendered Markdown, such as Agent threads and the
+    /// Markdown preview.
+    pub markdown: Option<MarkdownSettingsContent>,
+
     /// The settings for the markdown preview.
     pub markdown_preview: Option<MarkdownPreviewSettingsContent>,
 
@@ -407,7 +411,7 @@ fallible_options::flattened_deserialize!(SettingsContent {
         call_hierarchy, command_palette, file_finder, git_panel, tabs, tab_bar, status_bar, preview_tabs, agent,
         agent_servers, audio, auto_update, base_keymap, collaboration_panel, debugger, diagnostics,
         git,
-        global_lsp_settings, image_viewer, markdown_preview, repl, helix_mode, hide_mouse,
+        global_lsp_settings, image_viewer, markdown, markdown_preview, repl, helix_mode, hide_mouse,
         journal, log, line_indicator_format, language_models, copilot, outline_panel, project_panel,
         node, proxy, reduce_motion, server_url, credentials_url, session, telemetry, terminal,
         title_bar, vim_mode, calls, which_key, vim, modeline_lines, feature_flags,
@@ -1358,6 +1362,57 @@ pub struct MarkdownPreviewSettingsContent {
     ///
     /// Default: 800
     pub max_width: Option<PixelSetting>,
+}
+
+/// Settings shared by rendered Markdown.
+#[with_fallible_options]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, MergeFrom, Default, PartialEq)]
+pub struct MarkdownSettingsContent {
+    /// How inline code (`like this`) is styled in rendered Markdown.
+    pub inline_code: Option<MarkdownInlineCodeSettingsContent>,
+}
+
+/// How inline code is styled in rendered Markdown.
+#[with_fallible_options]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, MergeFrom, Default, PartialEq)]
+pub struct MarkdownInlineCodeSettingsContent {
+    /// Which inline code style to use.
+    ///
+    /// Default: "classic"
+    pub style: Option<MarkdownInlineCodeStyle>,
+    /// Horizontal padding, in pixels, inside each side of the inline code
+    /// background. `0` disables it. Only applies when `style` is `"theme"`.
+    ///
+    /// Default: 4
+    pub padding: Option<PixelSetting>,
+    /// Corner radius, in pixels, of the inline code background. Only applies
+    /// when `style` is `"theme"`.
+    ///
+    /// Default: 4
+    pub corner_radius: Option<PixelSetting>,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    Default,
+    PartialEq,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkdownInlineCodeStyle {
+    /// A faint background behind the code text, with the surrounding text color.
+    #[default]
+    Classic,
+    /// A bordered chip using the `markdown.inline_code.*` theme colors, which
+    /// fall back to `text`, `element.background`, and `border.variant`.
+    Theme,
 }
 
 /// The settings for the image viewer.

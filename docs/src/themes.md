@@ -111,6 +111,48 @@ To see a comprehensive list of captures (like `comment` and `comment.doc`) see [
 To see a list of available theme attributes look at the JSON file for your theme.
 For example, [assets/themes/one/one.json](https://github.com/zed-industries/zed/blob/main/assets/themes/one/one.json) for the default One Dark and One Light themes.
 
+### Markdown Inline Code
+
+By default, inline code in rendered Markdown (Agent threads, the Markdown preview, and notebook cells) is drawn with a faint background in the surrounding text color.
+Set `markdown.inline_code.style` to `"theme"` to draw it as a bordered chip instead:
+
+```json [settings]
+{
+  "markdown": {
+    "inline_code": {
+      "style": "theme",
+      "padding": 4,
+      "corner_radius": 4
+    }
+  }
+}
+```
+
+`padding` is the horizontal space, in pixels, inside each side of the chip (`0` disables it), and `corner_radius` rounds the chip's corners.
+
+The chip uses these theme colors, each of which falls back independently when unset:
+
+| Color                             | Fallback             |
+| --------------------------------- | -------------------- |
+| `markdown.inline_code.foreground` | `text`               |
+| `markdown.inline_code.background` | `element.background` |
+| `markdown.inline_code.border`     | `border.variant`     |
+
+A fully transparent color, such as `"#00000000"`, paints nothing rather than falling back.
+These colors have no effect while `style` is `"classic"`.
+
+```json [settings]
+{
+  "theme_overrides": {
+    "One Dark": {
+      "markdown.inline_code.foreground": "#c6a0f6",
+      "markdown.inline_code.background": "#c6a0f61a",
+      "markdown.inline_code.border": "#00000000"
+    }
+  }
+}
+```
+
 ## Local Themes {#local-themes}
 
 Store new themes locally by placing them in the `~/.config/zed/themes` directory (macOS and Linux) or `%USERPROFILE%\AppData\Roaming\Zed\themes\` (Windows).

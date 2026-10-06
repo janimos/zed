@@ -113,6 +113,22 @@
     // The unit for image file sizes: "binary" (KiB, MiB) or decimal (KB, MB)
     "unit": "binary",
   },
+  // Settings shared by rendered Markdown (Agent threads, Markdown preview, ...)
+  "markdown": {
+    "inline_code": {
+      // How inline code is styled:
+      //   "classic": a faint background behind the code text.
+      //   "theme": a bordered chip using the `markdown.inline_code.foreground`,
+      //            `markdown.inline_code.background`, and `markdown.inline_code.border`
+      //            theme colors.
+      "style": "classic",
+      // The following only apply to the "theme" style.
+      // Horizontal padding, in pixels, inside each side of the chip. 0 disables it.
+      "padding": 4,
+      // Corner radius of the chip, in pixels.
+      "corner_radius": 4,
+    },
+  },
   // Markdown preview settings
   "markdown_preview": {
     // The default font size for the markdown preview. Falls back to the UI font size if unset.
